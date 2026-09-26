@@ -1,0 +1,33 @@
+[project]
+name = "ehr-dictation-sidecar"
+version = "0.1.0"
+description = "MedASR speech-to-text sidecar. Runs on the on-prem server only, with no internet egress."
+requires-python = ">=3.12"
+dependencies = [
+    "transformers>=5.17,<6",  # MedASR requires Transformers 5.x
+    "torch>=2.14,<3",
+    "numpy>=2.5,<3",
+    "fastapi>=0.141,<1",
+    "uvicorn>=0.54,<1",
+]
+
+[tool.uv]
+# Linux covers the container on every server (arm64 under Docker on a Mac, x86-64 on a PC).
+environments = [
+    "sys_platform == 'linux'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
+
+# MedASR is small enough for CPU on every machine. PyPI's Linux torch pulls in CUDA
+# (several GB, useless under Docker on a Mac or with an AMD GPU), so Linux uses the CPU-only build.
+# macOS and Windows wheels on PyPI are already CPU (and Metal) builds.
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -1,0 +1,4 @@
+[env]
+# aws-lc-sys (TLS for the sync client) needs NASM to build on x86-64 Windows. Without NASM installed,
+# this lets it use the prebuilt NASM objects shipped in the crate. Ignored on macOS, and when NASM is present.
+AWS_LC_SYS_PREBUILT_NASM = "1"

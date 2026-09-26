@@ -1,0 +1,48 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Client libraries restored by LibMan at build (versions pinned in src/Ehr.Design/libman.json)
+src/Ehr.Design/wwwroot/lib/
+
+# Rust / Tauri
+target/
+src/Ehr.Desktop/src-tauri/gen/schemas/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Secrets come from environment configuration, never the repo
+.env
+.env.*
+!.env.example
+*.pfx
+*.pem
+*.key
+
+# Model weights are downloaded during setup, never committed
+*.gguf
+*.safetensors
+
+# Audio is PHI and lives only on the on-prem encrypted volume
+*.wav
+*.webm
+*.ogg
+*.m4a
+*.mp3
+*.flac
+
+# Local databases (the desktop cache is SQLCipher)
+*.db
+*.sqlite
+*.sqlite3
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

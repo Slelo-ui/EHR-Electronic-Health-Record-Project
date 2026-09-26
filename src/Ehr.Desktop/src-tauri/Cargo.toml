@@ -1,0 +1,29 @@
+[package]
+name = "ehr-desktop"
+version = "0.1.0"
+description = "EHR desktop app: Tauri shell, encrypted local SQLite, sync client"
+edition = "2024"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = [] }
+# SQLCipher with vendored OpenSSL, so macOS and Windows builds need no system crypto library.
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
+# The SQLCipher key lives in the OS credential store; platform stores are below.
+keyring-core = "1"
+# Records created offline get UUIDv7 IDs on the client.
+uuid = { version = "1.26", features = ["v7", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Sync API client (rustls).
+reqwest = { version = "0.13", features = ["json"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The "keychain" store works for apps that are not code-signed with a provisioning profile.
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-native-keyring-store = "1"

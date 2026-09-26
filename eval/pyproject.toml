@@ -1,0 +1,8 @@
+[project]
+name = "ehr-dictation-eval"
+version = "0.1.0"
+description = "Dictation gold set and scoring: transcription word error rate, field-level precision and recall."
+requires-python = ">=3.12"
+dependencies = [
+    "jiwer>=4,<5",
+]
