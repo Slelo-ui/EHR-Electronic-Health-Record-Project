@@ -22,7 +22,7 @@ db/
   policies/         RLS, triggers, roles (hand-written, human-reviewed)
 eval/               dictation gold set and scoring
 bench/              load tests and budget assertions
-infra/              Compose topology, Barman, Tailscale ACLs
+infra/              compose (local server stack), barman (backup image), Tailscale ACLs
 AGENTS.md           conventions every coding agent follows
 ```
 
@@ -41,6 +41,7 @@ Everyone:
 | Tauri CLI | 2.x | `cargo install tauri-cli --version "^2" --locked` |
 | uv, for Python 3.12+ | | `pyproject.toml` in `src/Ehr.Dictation/sidecar` and `eval` |
 | Docker Desktop | Compose v2 | |
+| mkcert | | Local HTTPS certificates for the server stack (`infra/compose/README.md`) |
 
 **Apple Silicon Mac**
 
@@ -80,6 +81,10 @@ Then open http://localhost:5080. It avoids port 5000, which macOS's AirPlay Rece
 
 **Tests:** `dotnet test` runs the test projects, but they have no tests yet, so it reports "Zero tests ran" (exit code 8) until the security and architecture gates are written.
 
+## Local server stack
+
+`infra/compose` runs the whole server architecture on one machine with Docker Compose: the on-prem primary, the cloud replica, the isolated Barman backup host, and a simulated WAN with latency between them. It also covers the failure drills and a point-in-time restore. Setup and commands are in [infra/compose/README.md](infra/compose/README.md).
+
 ## Where dependencies are declared
 
 | Area | File |
@@ -89,6 +94,7 @@ Then open http://localhost:5080. It avoids port 5000, which macOS's AirPlay Rece
 | Desktop | `src/Ehr.Desktop/src-tauri/Cargo.toml` |
 | MedASR sidecar | `src/Ehr.Dictation/sidecar/pyproject.toml` |
 | Dictation eval | `eval/pyproject.toml` |
+| Container images for the local stack | `infra/compose/compose.yaml`, `infra/barman/Dockerfile`, `src/Ehr.Web/Dockerfile` |
 
 ## Dictation server hardware
 

@@ -15,6 +15,25 @@
       "type": "shell",
       "command": "dotnet run --project src/Ehr.Web",
       "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "Server stack: start",
+      "type": "shell",
+      "command": "docker compose -f infra/compose/compose.yaml up -d --build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Server stack: stop",
+      "type": "shell",
+      "command": "docker compose -f infra/compose/compose.yaml --profile \"*\" down",
+      "problemMatcher": []
+    },
+    {
+      "label": "Server stack: reset",
+      "detail": "Stops the stack and deletes all its data",
+      "type": "shell",
+      "command": "docker compose -f infra/compose/compose.yaml --profile \"*\" down -v",
+      "problemMatcher": []
     }
   ]
 }

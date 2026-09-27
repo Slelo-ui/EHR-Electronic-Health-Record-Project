@@ -24,6 +24,10 @@ __pycache__/
 *.pem
 *.key
 
+# Local server stack: generated certificates and downloaded models
+infra/compose/certs/
+infra/compose/models/
+
 # Model weights are downloaded during setup, never committed
 *.gguf
 *.safetensors

@@ -1,0 +1,26 @@
+[
+  {
+    "name": "internet_to_cloud_app",
+    "listen": "0.0.0.0:9443",
+    "upstream": "cloud-app:8443",
+    "enabled": true
+  },
+  {
+    "name": "wan_cloud_to_onprem_app",
+    "listen": "0.0.0.0:8443",
+    "upstream": "onprem-app:8443",
+    "enabled": true
+  },
+  {
+    "name": "wan_replication",
+    "listen": "0.0.0.0:5432",
+    "upstream": "onprem-db:5432",
+    "enabled": true
+  },
+  {
+    "name": "wan_backup",
+    "listen": "0.0.0.0:5433",
+    "upstream": "onprem-db:5432",
+    "enabled": true
+  }
+]

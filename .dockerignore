@@ -1,0 +1,14 @@
+# Images built from the repository root copy only what their Dockerfile names; this keeps
+# build output, secrets and large local files out of the build context.
+.git
+**/bin
+**/obj
+**/target
+**/node_modules
+**/.venv
+**/.env
+**/*.pem
+**/*.gguf
+src/Ehr.Design/wwwroot/lib
+infra/compose/certs
+infra/compose/models

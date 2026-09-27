@@ -1,0 +1,13 @@
+# Windows or Linux server with an NVIDIA GPU: run Llama on the GPU.
+#   docker compose -f compose.yaml -f compose.nvidia.yaml --profile ai up -d
+# llama-server offloads layers to the GPU automatically (--n-gpu-layers defaults to auto).
+services:
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b11176
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -1,0 +1,193 @@
+# Local mock of the whole server architecture: on-prem primary, cloud replica, isolated backup,
+# and the WAN between them. See infra/compose/README.md.
+name: ehr
+
+x-web-app: &web-app
+  build:
+    context: ../..
+    dockerfile: src/Ehr.Web/Dockerfile
+  image: ehr-web:dev
+  volumes:
+    - ./certs:/certs:ro
+  environment: &web-app-env
+    ASPNETCORE_ENVIRONMENT: Development
+    ASPNETCORE_HTTP_PORTS: ""
+    ASPNETCORE_HTTPS_PORTS: "8443"
+    ASPNETCORE_Kestrel__Certificates__Default__Path: /certs/example.com.pem
+    ASPNETCORE_Kestrel__Certificates__Default__KeyPath: /certs/example.com-key.pem
+
+x-postgres-healthcheck: &postgres-healthcheck
+  test: ["CMD", "pg_isready", "-U", "postgres"]
+  interval: 5s
+  timeout: 3s
+  retries: 30
+
+services:
+  # ---- On-prem site ------------------------------------------------------------------------
+
+  onprem-db:
+    image: postgres:18
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set it in infra/compose/.env}
+      POSTGRES_DB: ehr
+      REPLICATOR_PASSWORD: ${REPLICATOR_PASSWORD:?set it in infra/compose/.env}
+      BARMAN_PASSWORD: ${BARMAN_PASSWORD:?set it in infra/compose/.env}
+    command:
+      - postgres
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      # A backup or replica outage can't fill the primary's disk.
+      - -c
+      - max_slot_wal_keep_size=2GB
+    volumes:
+      - onprem-db:/var/lib/postgresql
+      - ./postgres/primary/initdb:/docker-entrypoint-initdb.d:ro
+      - ./postgres/primary/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    ports:
+      - "127.0.0.1:${ONPREM_DB_PORT:-15432}:5432"
+    networks: [onprem]
+    healthcheck: *postgres-healthcheck
+
+  onprem-app:
+    <<: *web-app
+    environment:
+      <<: *web-app-env
+      Ehr__Site: OnPrem
+    ports:
+      - "127.0.0.1:${ONPREM_HTTPS_PORT:-8443}:8443"
+    networks: [onprem, inference]
+    depends_on:
+      onprem-db:
+        condition: service_healthy
+
+  # Opt-in (--profile ai). Reachable only from the on-prem app, with no internet access.
+  llama:
+    profiles: [ai]
+    image: ghcr.io/ggml-org/llama.cpp:server-b11176
+    # Refuses to start without an API key. (A required variable here would break the whole stack,
+    # because Compose checks variables for every service, including inactive profiles.)
+    entrypoint:
+      - /bin/sh
+      - -c
+      - '[ -n "$${LLAMA_API_KEY}" ] || { echo "Set LLAMA_API_KEY in infra/compose/.env" >&2; exit 1; }; exec /app/llama-server "$$@"'
+      - llama-server
+    command: ["--no-webui", "--no-slots"]
+    environment:
+      LLAMA_ARG_MODEL: /models/${LLAMA_MODEL_FILE:-Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf}
+      LLAMA_ARG_CTX_SIZE: "8192"
+      LLAMA_ARG_N_PARALLEL: "2"
+      LLAMA_API_KEY: ${LLAMA_API_KEY:-}
+    volumes:
+      - ./models:/models:ro
+    networks: [inference]
+
+  # ---- Cloud site --------------------------------------------------------------------------
+
+  cloud-db:
+    image: postgres:18
+    environment:
+      REPLICATOR_PASSWORD: ${REPLICATOR_PASSWORD:?set it in infra/compose/.env}
+    # Clones the primary over the WAN link on first start, then runs as a read-only hot standby.
+    entrypoint: ["/bin/sh", "/bootstrap/bootstrap-standby.sh"]
+    command: ["postgres", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
+    volumes:
+      - cloud-db:/var/lib/postgresql
+      - ./postgres/replica/bootstrap-standby.sh:/bootstrap/bootstrap-standby.sh:ro
+      - ./postgres/replica/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    ports:
+      - "127.0.0.1:${CLOUD_DB_PORT:-15433}:5432"
+    networks: [cloud]
+    healthcheck: *postgres-healthcheck
+    depends_on:
+      onprem-db:
+        condition: service_healthy
+      wan:
+        condition: service_healthy
+
+  cloud-app:
+    <<: *web-app
+    environment:
+      <<: *web-app-env
+      Ehr__Site: Cloud
+    # No published port: off-site browsers reach it through the wan service, like the internet.
+    networks: [cloud]
+    depends_on:
+      cloud-db:
+        condition: service_healthy
+
+  # ---- Isolated backup site ----------------------------------------------------------------
+
+  barman:
+    build: ../barman
+    image: ehr-barman:dev
+    environment:
+      BARMAN_PASSWORD: ${BARMAN_PASSWORD:?set it in infra/compose/.env}
+    volumes:
+      - barman:/var/lib/barman
+    # No ports and no listening services: Barman only ever connects out, to the primary.
+    networks: [backup]
+    depends_on:
+      onprem-db:
+        condition: service_healthy
+      wan:
+        condition: service_healthy
+
+  # Opt-in (--profile restore): starts PostgreSQL on a cluster that `barman recover` wrote.
+  restore-db:
+    profiles: [restore]
+    image: postgres:18
+    environment:
+      PGDATA: /var/lib/barman/restore
+    volumes:
+      - barman:/var/lib/barman
+    ports:
+      - "127.0.0.1:${RESTORE_DB_PORT:-15434}:5432"
+    networks: [backup]
+
+  # ---- The WAN and the internet ------------------------------------------------------------
+
+  # The only path between sites (standing in for Tailscale) and from the "internet" to the cloud.
+  # Every link through it gets simulated latency.
+  wan:
+    image: ghcr.io/shopify/toxiproxy:2.12.0
+    command: ["-host=0.0.0.0", "-config=/config/toxiproxy.json"]
+    volumes:
+      - ./toxiproxy/toxiproxy.json:/config/toxiproxy.json:ro
+    ports:
+      - "127.0.0.1:${CLOUD_HTTPS_PORT:-9443}:9443"
+      - "127.0.0.1:${TOXIPROXY_API_PORT:-8474}:8474"
+    networks: [onprem, cloud, backup]
+    healthcheck:
+      test: ["CMD", "/toxiproxy-cli", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # Runs once per `docker compose up` and adds the latency to every link.
+  wan-latency:
+    image: curlimages/curl:8.22.0
+    entrypoint: ["/bin/sh", "/apply-latency.sh"]
+    environment:
+      INTERNET_LATENCY_MS: ${INTERNET_LATENCY_MS:-30}
+      INTERNET_JITTER_MS: ${INTERNET_JITTER_MS:-5}
+      WAN_LATENCY_MS: ${WAN_LATENCY_MS:-40}
+      WAN_JITTER_MS: ${WAN_JITTER_MS:-5}
+    volumes:
+      - ./toxiproxy/apply-latency.sh:/apply-latency.sh:ro
+    networks: [cloud]
+    depends_on:
+      wan:
+        condition: service_healthy
+
+networks:
+  onprem:
+  cloud:
+  backup:
+  # No route out: the models can't reach the internet.
+  inference:
+    internal: true
+
+volumes:
+  onprem-db:
+  cloud-db:
+  barman:

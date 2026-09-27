@@ -22,6 +22,7 @@ Conventions every coding agent (and every person) follows in this repo. Most com
 
 - Schema: EF Core migrations, generated into `db/migrations`.
 - RLS, triggers, and roles: hand-written in `db/policies`.
+- The infrastructure roles `replicator` (cloud standby) and `barman` (backups) are created when the primary is first initialized, by `infra/compose/postgres/primary/initdb`. Neither has table privileges.
 - Migrations run as `ehr_owner`, in CI and deploy only. The running app never uses that role.
 
 ## Human review
@@ -51,9 +52,10 @@ The team develops on Apple Silicon Macs and Intel/AMD Windows PCs; servers and C
 
 - Line endings are LF (`.gitattributes`). Only `.cmd` and `.bat` files use CRLF.
 - Match the case of file and folder names exactly. Macs and Windows ignore case; the Linux servers don't.
-- No bash-only scripts. Use `dotnet run script.cs` (.NET 10) or PowerShell 7, which run on both.
+- No bash-only scripts on your machine. Use `dotnet run script.cs` (.NET 10) or PowerShell 7, which run on both. Scripts that run inside Linux containers are POSIX `sh`.
 - Container images are built in CI for `linux/amd64` and `linux/arm64`, never pushed from a laptop. Macs build arm64 images that an x86-64 server can't run.
 - PostgreSQL data lives in Docker named volumes, not host folders.
+- The local stack (`infra/compose`) publishes ports on `127.0.0.1` only, and app images run as a non-root user.
 - The desktop app makes network calls from Rust, not from the web view. The web view's origin differs by OS: `tauri://localhost` on macOS, `http://tauri.localhost` on Windows.
 - Never hard-code an audio recording format. WebKit (Safari, the macOS app) and Chromium (Chrome, Edge, the Windows app) record different containers; ffmpeg normalizes both on the server.
 
