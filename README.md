@@ -8,10 +8,10 @@ Early foundation. No EHR features exist yet.
 
 **Working today**
 
-- The desktop app (Tauri) opens a blank window. Verified on an Apple Silicon Mac. CI builds it for macOS and Windows on every push; it hasn't been run on a Windows PC yet.
+- The desktop app (Tauri) opens a blank window. Verified running on an Apple Silicon Mac. CI builds it on macOS and Windows on every push, and both builds pass; it hasn't been run on a Windows PC yet.
 - The web app (ASP.NET Core Razor Pages) serves a blank page, locally and inside the server stack. A smoke test checks that it returns HTTP 200.
 - The local server stack runs the whole server architecture in Docker Compose: the PostgreSQL 18 primary, its streaming replica, Barman backups with point-in-time restore, and a simulated WAN. Verified on Linux, and on an Apple Silicon Mac for replication, isolation, backups and restore; Windows is not yet verified.
-- CI (GitHub Actions) checks every push and pull request, and publishes the web image from `main`. See [Continuous integration](#continuous-integration).
+- CI (GitHub Actions) checks every push and pull request. `main` only accepts reviewed pull requests that pass it, and each commit on `main` publishes the web image. See [Continuous integration](#continuous-integration).
 - Dependency manifests and toolchain versions are in place. Python packages use version ranges until a lockfile is added.
 
 **Not built yet:** the database schema and policies, sign-in and authorization, the clinical workflows, the patient portal, desktop sync, dictation, and the security and architecture tests (their projects exist but are empty).
@@ -124,7 +124,20 @@ Then open http://localhost:5080. It avoids port 5000, which macOS's AirPlay Rece
 | `ci` | Passes only when every job above passes. It's the one check `main` requires. |
 | Publish image | On `main` only, after `ci` passes: pushes `ghcr.io/tarnan3751/ehr-web:<commit>` for `linux/amd64` and `linux/arm64` |
 
-Changes reach `main` through a pull request: `ci` must pass, and someone other than the author must approve it.
+The Windows desktop build is the slowest job: about 25 minutes when nothing is cached. Later runs reuse compiled dependencies and are faster.
+
+To add a check, add a job to the workflow and to the `ci` job's `needs` list. Branch protection doesn't need to change.
+
+### How changes reach `main`
+
+`main` is protected by a ruleset:
+
+1. Work on a branch and open a pull request into `main`.
+2. `ci` must pass on the pull request.
+3. Someone other than the author must approve it. Pushing new commits dismisses earlier approvals.
+4. The branch must be up to date with `main`. If `main` has moved on, click **Update branch** on the pull request (or merge `main` into your branch and push). CI runs again and must pass before the merge.
+
+Nobody can force-push to `main` or delete it.
 
 Before you push, fix formatting and run the tests from the repository folder:
 
@@ -135,7 +148,21 @@ dotnet test
 
 If you changed the desktop app, also run `cargo fmt` from `src/Ehr.Desktop/src-tauri`.
 
-To add a check, add a job to the workflow and to the `ci` job's `needs` list. Branch protection doesn't need to change.
+### Published images
+
+Each commit on `main` that passes `ci` publishes `ghcr.io/tarnan3751/ehr-web:<full commit ID>`, for `linux/amd64` and `linux/arm64`. The package is public, so pulling it needs no login:
+
+```
+docker pull ghcr.io/tarnan3751/ehr-web:<full commit ID>
+```
+
+There is no `latest` tag: a deployment names the exact commit it runs.
+
+### Repository security settings
+
+- **Secret scanning with push protection.** GitHub blocks a push that contains a recognizable token or key. It can't recognize a plain password, so secrets stay in `.env` files, which are gitignored.
+- **Dependabot alerts** for known vulnerabilities in the .NET, Rust and Python dependencies. Separately, Dependabot opens a weekly pull request that updates the GitHub Actions the workflow uses.
+- **Workflows from forks** wait for approval before they run.
 
 ## Where dependencies are declared
 
