@@ -8,12 +8,13 @@ Early foundation. No EHR features exist yet.
 
 **Working today**
 
-- The desktop app (Tauri) opens a blank window. Verified on an Apple Silicon Mac; Windows is not yet verified.
-- The web app (ASP.NET Core Razor Pages) serves a blank page, locally and inside the server stack.
+- The desktop app (Tauri) opens a blank window. Verified on an Apple Silicon Mac. CI builds it for macOS and Windows on every push; it hasn't been run on a Windows PC yet.
+- The web app (ASP.NET Core Razor Pages) serves a blank page, locally and inside the server stack. A smoke test checks that it returns HTTP 200.
 - The local server stack runs the whole server architecture in Docker Compose: the PostgreSQL 18 primary, its streaming replica, Barman backups with point-in-time restore, and a simulated WAN. Verified on Linux, and on an Apple Silicon Mac for replication, isolation, backups and restore; Windows is not yet verified.
+- CI (GitHub Actions) checks every push and pull request, and publishes the web image from `main`. See [Continuous integration](#continuous-integration).
 - Dependency manifests and toolchain versions are in place. Python packages use version ranges until a lockfile is added.
 
-**Not built yet:** the database schema and policies, sign-in and authorization, the clinical workflows, the patient portal, desktop sync, dictation, and the tests themselves (the test projects exist but are empty).
+**Not built yet:** the database schema and policies, sign-in and authorization, the clinical workflows, the patient portal, desktop sync, dictation, and the security and architecture tests (their projects exist but are empty).
 
 ## Layout
 
@@ -30,13 +31,16 @@ src/
 tests/
   Ehr.Security.Tests/      RLS, role, and audit gates against real PostgreSQL 18
   Ehr.Architecture.Tests/  layering, and PHI reads only through the PHI reader
+  Ehr.Web.Tests/           the web app, run in memory: a smoke test so far
 db/
   migrations/       EF-generated
   policies/         RLS, triggers, roles (hand-written, human-reviewed)
 eval/               dictation gold set and scoring
 bench/              load tests and budget assertions
 infra/              compose (local server stack), barman (backup image), tailscale (access rules)
+.github/            CI workflow and Dependabot settings
 .vscode/            shared settings, recommended extensions, and run tasks
+.editorconfig       editor and formatting settings (checked in CI)
 AGENTS.md           conventions every coding agent follows
 ```
 
@@ -102,11 +106,36 @@ Then open http://localhost:5080. It avoids port 5000, which macOS's AirPlay Rece
 | Server stack: stop | Stops it and keeps its data |
 | Server stack: reset | Stops it and deletes all its data |
 
-**Tests:** `dotnet test` runs the test projects, but they have no tests yet, so it reports "Zero tests ran" (exit code 8) until the security and architecture gates are written.
+**Tests:** `dotnet test` runs every test project. So far only the web app's smoke test exists; the security and architecture projects are allowed to report zero tests until their first test is written.
 
 ## Local server stack
 
 `infra/compose` runs the whole server architecture on one machine with Docker Compose: the on-prem primary and app, the cloud replica and app, the isolated Barman backup host, and a simulated WAN with latency between them. It also covers the failure drills and a point-in-time restore. Setup (certificates and hosts-file entries) and every command are in [infra/compose/README.md](infra/compose/README.md).
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to any branch, and on every pull request into `main`.
+
+| Job | What it checks |
+|---|---|
+| Web app | Restores packages (a high or critical security advisory fails the run), builds in Release, then runs `dotnet format --verify-no-changes` and `dotnet test` |
+| Server stack | Starts the local server stack (`infra/compose`), then checks that all three sites load over HTTPS, both databases accept connections, the replica and Barman are streaming, and `barman check` passes |
+| Desktop | `cargo fmt --check`, `cargo clippy` (warnings count as errors) and `cargo build`, on macOS (Apple Silicon) and Windows (x64) |
+| `ci` | Passes only when every job above passes. It's the one check `main` requires. |
+| Publish image | On `main` only, after `ci` passes: pushes `ghcr.io/tarnan3751/ehr-web:<commit>` for `linux/amd64` and `linux/arm64` |
+
+Changes reach `main` through a pull request: `ci` must pass, and someone other than the author must approve it.
+
+Before you push, fix formatting and run the tests from the repository folder:
+
+```
+dotnet format
+dotnet test
+```
+
+If you changed the desktop app, also run `cargo fmt` from `src/Ehr.Desktop/src-tauri`.
+
+To add a check, add a job to the workflow and to the `ci` job's `needs` list. Branch protection doesn't need to change.
 
 ## Where dependencies are declared
 
@@ -118,6 +147,7 @@ Then open http://localhost:5080. It avoids port 5000, which macOS's AirPlay Rece
 | MedASR sidecar | `src/Ehr.Dictation/sidecar/pyproject.toml` |
 | Dictation eval | `eval/pyproject.toml` |
 | Container images for the local stack | `infra/compose/compose.yaml`, `infra/barman/Dockerfile`, `src/Ehr.Web/Dockerfile` |
+| GitHub Actions used by CI | `.github/workflows/ci.yml`, each pinned to a commit. Dependabot (`.github/dependabot.yml`) proposes updates weekly. |
 
 ## Dictation server hardware
 

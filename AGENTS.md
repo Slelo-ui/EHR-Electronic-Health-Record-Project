@@ -27,7 +27,7 @@ Conventions every coding agent (and every person) follows in this repo. Most com
 
 ## Human review
 
-Changes to the following get line-by-line review by someone other than the person who prompted the agent:
+Every change reaches `main` through a pull request, with the `ci` check passing and approval from someone other than its author. On top of that, changes to the following get line-by-line review by someone other than the person who prompted the agent:
 
 - `db/policies`
 - authorization attributes and policies
@@ -36,15 +36,22 @@ Changes to the following get line-by-line review by someone other than the perso
 
 ## What "done" means
 
-Every CI gate passes:
+The `ci` check passes (`.github/workflows/ci.yml`). Today it runs:
+
+- Restore (a high or critical package advisory fails it), a Release build, `dotnet format --verify-no-changes`, and `dotnet test`.
+- The local server stack: it starts, serves all three sites, replicates, and backs up.
+- macOS and Windows desktop builds, with `cargo fmt --check` and `cargo clippy -D warnings`.
+
+Gates added to `ci` as the code they check appears:
 
 - Every PHI table has RLS enabled and forced, plus a write-audit trigger.
 - No runtime role owns a table or has `BYPASSRLS`.
 - Querying a PHI table without `app.user_id` set returns zero rows.
 - An architecture test proves PHI reads only go through the PHI reader.
 - p99 server render under 20 ms on 50,000 seeded patients; page JavaScript under 50 KB; first contentful paint under 500 ms.
-- macOS and Windows desktop builds succeed.
 - Dictation eval scores do not drop below the last accepted baseline.
+
+Run `dotnet format` (and `cargo fmt` for the desktop app) before pushing. When `Ehr.Security.Tests` or `Ehr.Architecture.Tests` gets its first test, delete that project's `--ignore-exit-code 8` line.
 
 ## Cross-platform
 

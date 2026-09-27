@@ -1,0 +1,234 @@
+# Builds, checks and tests everything on every push and on pull requests into main.
+# `ci` is the one check branch protection requires: add new jobs to its `needs` list.
+# See "Continuous integration" in README.md.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# Every job gets a read-only token unless it asks for more.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the older run. Runs on main always finish,
+# so every commit on main gets its image.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  web:
+    name: Web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Installs the newest .NET 10 SDK, which global.json accepts.
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      # NuGet checks every package against known advisories; high and critical ones fail the run.
+      - name: Restore
+        run: dotnet restore Ehr.slnx "-warnaserror:NU1903;NU1904"
+
+      - name: Build
+        run: dotnet build Ehr.slnx --configuration Release --no-restore
+
+      - name: Check formatting
+        run: dotnet format Ehr.slnx --verify-no-changes --no-restore
+
+      - name: Test
+        run: dotnet test --solution Ehr.slnx --configuration Release --no-build
+
+  stack:
+    name: Server stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: infra/compose
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The one-time setup from infra/compose/README.md, with a self-signed certificate standing in
+      # for mkcert. The key must be readable by the app's non-root user.
+      - name: Create settings and a certificate
+        run: |
+          cp .env.example .env
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=example.com" \
+            -addext "subjectAltName=DNS:example.com,DNS:*.example.com" \
+            -keyout certs/example.com-key.pem -out certs/example.com.pem
+          chmod 644 certs/example.com-key.pem
+
+      - name: Check the Compose files
+        run: |
+          docker compose config --quiet
+          docker compose -f compose.yaml -f compose.nvidia.yaml config --quiet
+
+      - name: Build the images
+        run: docker compose build
+
+      - name: Start the stack
+        run: docker compose up --detach --wait --wait-timeout 300
+
+      # On-site through the LAN, then off-site and the portal through the simulated internet.
+      - name: Pages load
+        run: |
+          for site in ehr.example.com:8443 ehr-remote.example.com:9443 portal.example.com:9443; do
+            curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-all-errors \
+              --cacert certs/example.com.pem --resolve "$site:127.0.0.1" \
+              --output /dev/null --write-out "https://$site %{http_code}\n" "https://$site/"
+          done
+
+      - name: Databases accept connections
+        run: |
+          docker compose exec -T -u postgres onprem-db pg_isready
+          docker compose exec -T -u postgres cloud-db pg_isready
+
+      # The primary sees the cloud replica and Barman streaming through their replication slots.
+      - name: Replication is streaming
+        run: |
+          query="select string_agg(s.slot_name || '=' || coalesce(r.state, 'not connected'), ' ' order by s.slot_name)
+                 from pg_replication_slots s left join pg_stat_replication r on r.pid = s.active_pid"
+          expected="barman=streaming cloud_replica=streaming"
+          for _ in $(seq 30); do
+            slots=$(docker compose exec -T -u postgres onprem-db psql -Atc "$query" || true)
+            [ "$slots" = "$expected" ] && break
+            sleep 2
+          done
+          echo "Slots: $slots"
+          [ "$slots" = "$expected" ]
+          [ "$(docker compose exec -T -u postgres cloud-db psql -Atc 'select pg_is_in_recovery()')" = t ]
+          echo "cloud-db is a read-only standby"
+
+      # Barman's first base backup takes about a minute; `barman check` fails until it's done.
+      - name: Backups are healthy
+        run: |
+          for _ in $(seq 36); do
+            if report=$(docker compose exec -T -u postgres barman barman check onprem); then
+              echo "$report"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "$report"
+          exit 1
+
+      - name: Show containers and logs
+        if: failure()
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile "*" down --volumes
+
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # The team's machines: Apple Silicon Macs and x64 Windows PCs.
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: src/Ehr.Desktop/src-tauri
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Installs the Rust version and components pinned in rust-toolchain.toml.
+      - name: Install Rust
+        run: rustup toolchain install --no-self-update
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src/Ehr.Desktop/src-tauri
+
+      # The vendored OpenSSL build rejects Git's Perl, which can come first on PATH.
+      - name: Use Strawberry Perl for OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = Get-Command perl -All | Where-Object Source -NotLike '*\Git\*' | Select-Object -First 1 -ExpandProperty Source
+          if (-not $perl) { throw "No Perl other than Git's is on PATH." }
+          Write-Output "Using $perl"
+          "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build --locked
+
+  # Fails if any job it needs failed or was cancelled. A skipped job counts as passing, so a job
+  # can later be limited to runs where its files changed.
+  ci:
+    # Branch protection requires a check by this name; renaming it means updating the ruleset.
+    name: ci
+    if: always()
+    needs: [web, stack, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          case " $RESULTS " in
+            *" failure "* | *" cancelled "*) exit 1 ;;
+          esac
+
+  # Main only: the web image for both server architectures, tagged with the commit it came from.
+  publish:
+    name: Publish image
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read # checkout
+      packages: write # push the image to ghcr.io
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The Dockerfile compiles on the runner's own architecture for each target, so no emulation.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: src/Ehr.Web/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/ehr-web:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=ehr-web
+          cache-to: type=gha,mode=max,scope=ehr-web

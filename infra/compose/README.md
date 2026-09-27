@@ -1,6 +1,6 @@
 # Local server stack
 
-The whole server architecture on one machine, with Docker Compose: the on-prem primary, the cloud replica, the isolated backup host, and a simulated WAN between them. Run every command below from this folder (`infra/compose`).
+The whole server architecture on one machine, with Docker Compose: the on-prem primary, the cloud replica, the isolated backup host, and a simulated WAN between them. Run every command below from this folder (`infra/compose`). CI starts this same stack on every push and checks it (see "Continuous integration" in the root README).
 
 ## What runs
 
@@ -12,7 +12,7 @@ The whole server architecture on one machine, with Docker Compose: the on-prem p
 | `cloud-app` | Cloud app | Reached only through the simulated internet |
 | `barman` | Isolated backup host | Streams WAL and takes base backups; listens on nothing |
 | `wan` | Tailscale and the internet | [Toxiproxy](https://github.com/Shopify/toxiproxy): the only path between sites, with latency on every link |
-| `wan-latency` | | One-shot job that sets the latency each time the stack starts; "Exited (0)" means it worked |
+| `wan-latency` | | One-shot job that sets the latency each time the stack starts; "Exited (0)" means it worked. `cloud-app` starts only after it. |
 | `llama` | Llama 3.1 on the on-prem server | Opt-in `ai` profile, on a network with no internet access |
 | `restore-db` | A restored copy of the primary | Opt-in `restore` profile, for the restore drill |
 
@@ -42,6 +42,8 @@ The apps are the blank web app for now; both containers run the same image and d
 | `docker compose --profile "*" down -v` | Stops everything and deletes all data, for a fresh cluster next time. |
 
 `--profile "*"` makes sure `llama` and `restore-db` stop too; without it, `down -v` can't delete a volume they still use.
+
+Add `--wait` to `up` to return only once every container is running and healthy, as CI does.
 
 In VS Code, the same three are under Terminal → Run Task: "Server stack: start", "Server stack: stop" and "Server stack: reset".
 
@@ -96,7 +98,7 @@ A stopped replica or Barman leaves its replication slot holding WAL on the prima
 
 ## Backup and point-in-time restore
 
-Barman takes a base backup on its first start, streams WAL continuously, and keeps a 7-day recovery window. To rehearse a restore:
+Barman takes a base backup about a minute after its first start, streams WAL continuously, and keeps a 7-day recovery window. Until that first backup finishes, `barman check onprem` reports `minimum redundancy requirements: FAILED`. To rehearse a restore:
 
 1. Note the time you want to go back to:
    `docker compose exec -u postgres onprem-db psql -Atc "select now()"`
