@@ -24,8 +24,9 @@ __pycache__/
 *.pem
 *.key
 
-# Local server stack: generated certificates and downloaded models
-infra/compose/certs/
+# Local server stack: generated certificates and downloaded models (the certs folder itself is kept)
+infra/compose/certs/*
+!infra/compose/certs/.gitkeep
 infra/compose/models/
 
 # Model weights are downloaded during setup, never committed
