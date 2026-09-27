@@ -1,0 +1,28 @@
+# Shared editor settings, so every editor and coding agent writes files the same way.
+# `dotnet format --verify-no-changes` checks C# files against this; rustfmt formats Rust on its own.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yaml,yml,csproj,props,targets,slnx,xml,html,sh}]
+indent_size = 2
+
+# cmd.exe needs CRLF (matches .gitattributes).
+[*.{cmd,bat}]
+end_of_line = crlf
+
+# Two trailing spaces are a line break in Markdown.
+[*.md]
+trim_trailing_whitespace = false
+
+[*.cs]
+# The conventions of the .NET templates, enforced so new files follow them.
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_using_directive_placement = outside_namespace:warning
+dotnet_sort_system_directives_first = true

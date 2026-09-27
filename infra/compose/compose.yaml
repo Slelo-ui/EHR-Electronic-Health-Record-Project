@@ -114,6 +114,10 @@ services:
     depends_on:
       cloud-db:
         condition: service_healthy
+      # Starts only once the latency is in place. This also lets `docker compose up --wait` succeed,
+      # which otherwise fails when the one-shot wan-latency job exits.
+      wan-latency:
+        condition: service_completed_successfully
 
   # ---- Isolated backup site ----------------------------------------------------------------
 

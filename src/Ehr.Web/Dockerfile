@@ -1,5 +1,8 @@
 # Build context is the repository root (see infra/compose/compose.yaml).
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+# The build stage runs on the builder's own architecture and compiles for the target one, so an
+# x86-64 CI runner builds the arm64 image (and vice versa) without emulating the .NET SDK.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+ARG TARGETARCH
 WORKDIR /src
 
 # Restore first, from the project files alone, so code changes don't invalidate the package cache.
@@ -8,13 +11,13 @@ COPY src/Ehr.Web/Ehr.Web.csproj src/Ehr.Web/
 COPY src/Ehr.Domain/Ehr.Domain.csproj src/Ehr.Domain/
 COPY src/Ehr.Data/Ehr.Data.csproj src/Ehr.Data/
 COPY src/Ehr.Design/Ehr.Design.csproj src/Ehr.Design/
-RUN dotnet restore src/Ehr.Web/Ehr.Web.csproj
+RUN dotnet restore src/Ehr.Web/Ehr.Web.csproj --arch $TARGETARCH
 
 COPY src/Ehr.Web/ src/Ehr.Web/
 COPY src/Ehr.Domain/ src/Ehr.Domain/
 COPY src/Ehr.Data/ src/Ehr.Data/
 COPY src/Ehr.Design/ src/Ehr.Design/
-RUN dotnet publish src/Ehr.Web/Ehr.Web.csproj --configuration Release --no-restore --output /app
+RUN dotnet publish src/Ehr.Web/Ehr.Web.csproj --configuration Release --no-restore --arch $TARGETARCH --output /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
