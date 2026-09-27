@@ -1,2 +1,4 @@
 [toolchain]
 channel = "1.98.1"
+# rust-src lets rust-analyzer (VS Code) read the standard library; rustup's auto-install adds only the bare minimum otherwise.
+components = ["rust-src", "clippy", "rustfmt"]

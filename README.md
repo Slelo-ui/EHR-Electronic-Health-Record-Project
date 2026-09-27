@@ -55,6 +55,31 @@ Everyone:
 - Clone to a short path outside OneDrive, such as `C:\src\ehr`. The OpenSSL build nests deep enough to hit Windows' 260-character path limit, and OneDrive locks files mid-build.
 - NASM is not needed: `src/Ehr.Desktop/src-tauri/.cargo/config.toml` lets the TLS library use its prebuilt objects.
 
+## Running the blank app
+
+There are no features yet. Both hosts show a blank white screen, which proves the toolchain works end to end.
+
+**Desktop app** (after installing the Tauri CLI, above):
+
+```
+cd src/Ehr.Desktop/src-tauri
+cargo tauri dev
+```
+
+The first build takes several minutes because it compiles SQLCipher and OpenSSL; later builds are quick. A blank window titled "EHR" opens.
+
+**Web app:**
+
+```
+dotnet run --project src/Ehr.Web
+```
+
+Then open http://localhost:5080. It avoids port 5000, which macOS's AirPlay Receiver uses.
+
+**In VS Code:** open the repository folder, install the recommended extensions when prompted, then use Terminal → Run Task → "Run desktop app" or "Run web app".
+
+**Tests:** `dotnet test` runs the test projects, but they have no tests yet, so it reports "Zero tests ran" (exit code 8) until the security and architecture gates are written.
+
 ## Where dependencies are declared
 
 | Area | File |

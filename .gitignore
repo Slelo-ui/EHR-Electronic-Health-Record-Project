@@ -41,8 +41,11 @@ __pycache__/
 *.sqlite
 *.sqlite3
 
-# Editors and OS
+# Editors and OS (shared VS Code settings are committed)
 .idea/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
 .DS_Store
 Thumbs.db

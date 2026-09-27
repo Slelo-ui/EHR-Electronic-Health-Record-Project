@@ -1,0 +1,7 @@
+{
+  "dotnet.defaultSolution": "Ehr.slnx",
+  "rust-analyzer.linkedProjects": [
+    "src/Ehr.Desktop/src-tauri/Cargo.toml"
+  ],
+  "files.eol": "\n"
+}
