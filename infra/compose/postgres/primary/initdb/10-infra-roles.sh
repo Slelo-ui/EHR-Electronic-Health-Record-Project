@@ -1,3 +1,6 @@
+#!/bin/bash
+# Executable on purpose: Docker Desktop on macOS can report a mounted script as executable even
+# when it isn't, and the postgres entrypoint then fails trying to run it (exit 126).
 # Runs once, as the superuser, when the primary's volume is first created.
 # Creates the two infrastructure roles and their replication slots. App roles belong in db/policies.
 # Runs in the postgres database: function grants are per database, and that's where Barman connects.
