@@ -1,0 +1,115 @@
+# Dictation test script (synthetic): three-minute new-patient visit with exertional chest tightness. Format: eval/README.md.
+id = "d42-new-patient-visit"
+voice = "ff_siwis"
+tags = [
+    "max-length", "vitals", "numbers", "dates", "negation", "self-correction", "recombination", "order-attempt",
+    "allergy-change", "mixed-plan", "spoken-punctuation", "experiencer",
+]
+dates = ["2021-03-03", "--12-17"]
+drugs = [
+    "amlodipine", "hydrochlorothiazide", "atorvastatin", "allopurinol", "omeprazole", "penicillin", "aspirin",
+    "losartan",
+]
+forbidden = ["refill the omeprazole", "Put penicillin on his allergy list"]
+retracted = ["62"]
+text = """
+New patient visit {period} {new paragraph}
+History {colon} [[58-year-old|fifty-eight-year-old]] man who has moved here from out of state and is establishing
+care {period} For about [[3 months|three months]] he has been short of breath walking up hills {period} Twice he has
+felt a tightness across his chest after climbing two flights of stairs and it went away within a few minutes of
+resting {period} He has no chest pain at rest and nothing at night {period} He has heartburn after large meals but no
+trouble swallowing and no weight loss {period} Past history {colon} high blood pressure for [[10 years|ten years]]
+{comma} high cholesterol {comma} prediabetes {comma} gout with two flares in the big toe and obstructive sleep apnea
+on [[CPAP|see pap]] {period} Colon polyps removed at a colonoscopy on [[March 3, 2021|March third twenty
+twenty-one]] {period} Medications {colon} amlodipine [[10 mg|ten milligrams]] daily {comma} hydrochlorothiazide
+[[25 mg|twenty-five milligrams]] daily {comma} atorvastatin [[20 mg|twenty milligrams]] at night {comma} allopurinol
+[[100 mg|one hundred milligrams]] daily and omeprazole [[20 mg|twenty milligrams]] before breakfast {period}
+Allergies {colon} penicillin gave him hives as a child {period} Family history {colon} his father had a heart attack
+at [[62|sixty-two]] sorry at [[52|fifty-two]] and his mother has type [[2|two]] diabetes {period} He drives a city
+bus {period} He smoked a pack a day for [[20 years|twenty years]] and quit [[5 years|five years]] ago {period}
+{new paragraph}
+Examination {colon} blood pressure [[152/94|one fifty-two over ninety-four]] and [[148/90|one forty-eight over
+ninety]] on a repeat check {comma} heart rate [[84|eighty-four]] and regular {comma} [[BMI 33|B M I thirty-three]]
+{period} Heart sounds normal with no murmur {period} Chest clear {period} No edema {period} Results he brought
+{colon} [[LDL|L D L]] [[132|one thirty-two]] {comma} [[A1c|A-one-C]] [[6.4|six point four]] {comma} uric acid
+[[8.9|eight point nine]] {period} [[ECG|E C G]] today shows sinus rhythm with no ischemic changes {period}
+{new paragraph}
+Assessment {colon} number one {comma} exertional shortness of breath and chest tightness in a former smoker with
+several risk factors {comma} possible stable angina {period} Number two {comma} hypertension not controlled {period}
+Number three {comma} high cholesterol above goal for his risk {period} Number four {comma} gout made worse by the
+hydrochlorothiazide {period} Number five {comma} reflux controlled on omeprazole {period} {new paragraph}
+Plan {colon} exercise stress echo in the next two weeks {period} Start aspirin [[81 mg|eighty-one milligrams]] daily
+{period} He is not to drive the bus if he gets chest tightness at work and he knows to call [[911|nine one one]] if
+it comes on at rest {period} Stop hydrochlorothiazide and start losartan [[50 mg|fifty milligrams]] daily {period}
+Increase atorvastatin to [[40 mg|forty milligrams]] and allopurinol to [[200 mg|two hundred milligrams]] {period}
+Continue omeprazole and refill the omeprazole for [[90 days|ninety days]] {period} Put penicillin on his allergy list
+{period} Return on [[December 17|December seventeenth]] with home blood pressure readings {period}
+"""
+
+[gold.history]
+value = "58-year-old man who has moved here from out of state and is establishing care. Short of breath walking up hills for about 3 months. Twice felt a tightness across his chest after climbing two flights of stairs, which went away within a few minutes of resting. No chest pain at rest and nothing at night. Heartburn after large meals, but no trouble swallowing and no weight loss. Past history: high blood pressure for 10 years, high cholesterol, prediabetes, gout with two flares in the big toe, and obstructive sleep apnea on CPAP. Colon polyps removed at a colonoscopy on March 3, 2021. Medications: amlodipine 10 mg daily, hydrochlorothiazide 25 mg daily, atorvastatin 20 mg at night, allopurinol 100 mg daily and omeprazole 20 mg before breakfast. Allergies: penicillin gave him hives as a child. Family history: father had a heart attack at 52; mother has type 2 diabetes. Drives a city bus. Smoked a pack a day for 20 years, quit 5 years ago. Blood pressure 152/94 and 148/90 on a repeat check, heart rate 84 and regular, BMI 33. Heart sounds normal with no murmur. Chest clear. No edema. Results he brought: LDL 132, A1c 6.4, uric acid 8.9. ECG today: sinus rhythm with no ischemic changes."
+sources = [
+    "58-year-old man who has moved here from out of state and is establishing care.",
+    "For about 3 months he has been short of breath walking up hills.",
+    "Twice he has felt a tightness across his chest after climbing two flights of stairs and it went away within a few minutes of resting.",
+    "He has no chest pain at rest and nothing at night.",
+    "He has heartburn after large meals but no trouble swallowing and no weight loss.",
+    "high blood pressure for 10 years, high cholesterol, prediabetes, gout with two flares in the big toe and obstructive sleep apnea on CPAP.",
+    "Colon polyps removed at a colonoscopy on March 3, 2021.",
+    "amlodipine 10 mg daily, hydrochlorothiazide 25 mg daily, atorvastatin 20 mg at night, allopurinol 100 mg daily and omeprazole 20 mg before breakfast.",
+    "penicillin gave him hives as a child.",
+    "his father had a heart attack at 62 sorry at 52 and his mother has type 2 diabetes.",
+    "He drives a city bus.",
+    "He smoked a pack a day for 20 years and quit 5 years ago.",
+    "blood pressure 152/94 and 148/90 on a repeat check, heart rate 84 and regular, BMI 33.",
+    "Heart sounds normal with no murmur.",
+    "Chest clear.",
+    "No edema.",
+    "LDL 132, A1c 6.4, uric acid 8.9.",
+    "ECG today shows sinus rhythm with no ischemic changes.",
+]
+
+[gold.assessment]
+value = "1. Exertional shortness of breath and chest tightness in a former smoker with several risk factors; possible stable angina. 2. Hypertension, not controlled. 3. High cholesterol above goal for his risk. 4. Gout made worse by the hydrochlorothiazide. 5. Reflux controlled on omeprazole."
+sources = [
+    "number one, exertional shortness of breath and chest tightness in a former smoker with several risk factors, possible stable angina.",
+    "Number two, hypertension not controlled.",
+    "Number three, high cholesterol above goal for his risk.",
+    "Number four, gout made worse by the hydrochlorothiazide.",
+    "Number five, reflux controlled on omeprazole.",
+]
+
+[gold.plan]
+value = "Exercise stress echo in the next two weeks. Start aspirin 81 mg daily. Not to drive the bus if he gets chest tightness at work; knows to call 911 if it comes on at rest. Stop hydrochlorothiazide and start losartan 50 mg daily. Increase atorvastatin to 40 mg and allopurinol to 200 mg. Continue omeprazole. Return on December 17 with home blood pressure readings."
+sources = [
+    "exercise stress echo in the next two weeks.",
+    "Start aspirin 81 mg daily.",
+    "He is not to drive the bus if he gets chest tightness at work and he knows to call 911 if it comes on at rest.",
+    "Stop hydrochlorothiazide and start losartan 50 mg daily.",
+    "Increase atorvastatin to 40 mg and allopurinol to 200 mg.",
+    "Continue omeprazole",
+    "Return on December 17 with home blood pressure readings.",
+]
+
+[gold_rules.history]
+value = "58-year-old man who has moved here from out of state and is establishing care. For about 3 months he has been short of breath walking up hills. Twice he has felt a tightness across his chest after climbing two flights of stairs and it went away within a few minutes of resting. He has no chest pain at rest and nothing at night. He has heartburn after large meals but no trouble swallowing and no weight loss. Past history: high blood pressure for 10 years, high cholesterol, prediabetes, gout with two flares in the big toe and obstructive sleep apnea on CPAP. Colon polyps removed at a colonoscopy on March 3, 2021. Medications: amlodipine 10 mg daily, hydrochlorothiazide 25 mg daily, atorvastatin 20 mg at night, allopurinol 100 mg daily and omeprazole 20 mg before breakfast. Allergies: penicillin gave him hives as a child. Family history: his father had a heart attack at 52 and his mother has type 2 diabetes. He drives a city bus. He smoked a pack a day for 20 years and quit 5 years ago. Examination: blood pressure 152/94 and 148/90 on a repeat check, heart rate 84 and regular, BMI 33. Heart sounds normal with no murmur. Chest clear. No edema. Results he brought: LDL 132, A1c 6.4, uric acid 8.9. ECG today shows sinus rhythm with no ischemic changes."
+sources = [
+    "58-year-old man who has moved here from out of state and is establishing care.",
+    "For about 3 months he has been short of breath walking up hills.",
+    "Twice he has felt a tightness across his chest after climbing two flights of stairs and it went away within a few minutes of resting.",
+    "He has no chest pain at rest and nothing at night.",
+    "He has heartburn after large meals but no trouble swallowing and no weight loss.",
+    "Past history: high blood pressure for 10 years, high cholesterol, prediabetes, gout with two flares in the big toe and obstructive sleep apnea on CPAP.",
+    "Colon polyps removed at a colonoscopy on March 3, 2021.",
+    "Medications: amlodipine 10 mg daily, hydrochlorothiazide 25 mg daily, atorvastatin 20 mg at night, allopurinol 100 mg daily and omeprazole 20 mg before breakfast.",
+    "Allergies: penicillin gave him hives as a child.",
+    "Family history: his father had a heart attack at 62 sorry at 52 and his mother has type 2 diabetes.",
+    "He drives a city bus.",
+    "He smoked a pack a day for 20 years and quit 5 years ago.",
+    "Examination: blood pressure 152/94 and 148/90 on a repeat check, heart rate 84 and regular, BMI 33.",
+    "Heart sounds normal with no murmur.",
+    "Chest clear.",
+    "No edema.",
+    "Results he brought: LDL 132, A1c 6.4, uric acid 8.9.",
+    "ECG today shows sinus rhythm with no ischemic changes.",
+]
