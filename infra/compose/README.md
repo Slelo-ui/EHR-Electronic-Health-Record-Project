@@ -98,7 +98,9 @@ These follow the failure table in the project overview.
 | Backup host down | `docker compose stop barman` | `docker compose start barman` |
 | Cloud box compromised | `docker compose stop cloud-app cloud-db` | `docker compose start cloud-db cloud-app` |
 
-With the internet link or the primary down, off-site pages still load from the replica, and a save shows "Not saved: the server is unavailable". With the primary down, saving on-site shows the same.
+With the internet link or the primary down, off-site pages still load from the replica and, within a couple of seconds, say the system is read-only; a save shows "Not saved: the server is unavailable". With the primary down, saving on-site shows the same.
+
+If the two apps' `Ehr:CloudAudit:Key` (`EHR_CLOUD_AUDIT_KEY`) ever differ, as they can on two real servers, off-site pages don't say read-only, since the on-prem app answers, but the reads served off-site pile up in the cloud app's queue, and `docker compose logs cloud-app` says the keys don't match.
 
 To see the effect:
 
@@ -145,7 +147,7 @@ docker compose exec -u postgres onprem-db psql -c "select a.usename, a.client_ad
 
 In the real deployment the cross-site links also run inside Tailscale, which encrypts them once more.
 
-**At rest.** The keys that protect cookies and form tokens (`ehr.data_protection_keys`) are encrypted with the same certificate before they are stored; both apps hold it, so a copy of the table alone forges nothing. `docker compose exec -u postgres onprem-db psql -d ehr -c "select xml from ehr.data_protection_keys"` shows an `encryptedSecret`, never a key. (A stack set up before this change keeps its older, unencrypted key until that key rotates; `down -v` starts clean.) The desktop app's local copy is SQLCipher, keyed from the OS credential store. PostgreSQL itself does not encrypt its files, and neither does Barman: the database volumes and the backups are exactly as encrypted as the disk they live on. On the demo laptop that is FileVault (`fdesetup status` must say `FileVault is On`; Docker Desktop keeps its volumes inside your home folder, so they are covered), on a Windows PC BitLocker, and on the rented cloud servers the provider's encrypted volumes or LUKS. Check it before the demo: for the databases and the backups, "encrypted at rest" rests on it.
+**At rest.** The keys that protect cookies and form tokens (`ehr.data_protection_keys`) are encrypted with the same certificate before they are stored; both apps hold it, so a copy of the table alone forges nothing. `docker compose exec -u postgres onprem-db psql -d ehr -c "select xml from ehr.data_protection_keys"` shows an `encryptedSecret`, never a key. (A stack set up before this change keeps its older, unencrypted key until that key rotates; `down -v` starts clean.) The desktop app's local copy is SQLCipher, keyed from the OS credential store. PostgreSQL itself does not encrypt its files, and neither does Barman, nor the cloud app's audit queue (the `cloud-audit` volume, which holds who read which patient until the on-prem app has it): the database volumes, the queue and the backups are exactly as encrypted as the disk they live on. On the demo laptop that is FileVault (`fdesetup status` must say `FileVault is On`; Docker Desktop keeps its volumes inside your home folder, so they are covered), on a Windows PC BitLocker, and on the rented cloud servers the provider's encrypted volumes or LUKS. Check it before the demo: for the databases and the backups, "encrypted at rest" rests on it.
 
 ## What this doesn't reproduce
 

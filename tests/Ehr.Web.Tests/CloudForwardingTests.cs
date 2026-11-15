@@ -1,4 +1,8 @@
 using System.Net;
+using System.Text.RegularExpressions;
+using Ehr.Data.Accounts;
+using Ehr.Data.Audit;
+using Ehr.Web.CloudAudit;
 using Ehr.Web.Forwarding;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -8,8 +12,9 @@ using static Ehr.Web.Tests.Browser;
 namespace Ehr.Web.Tests;
 
 // The cloud app's forwarding to the on-prem app: saves always, and a person's reads until the replica has their
-// latest save. The tests in this class run one at a time, so each can count what crossed the link.
-public class CloudForwardingTests(WebApps apps) : IClassFixture<WebApps>
+// latest save, unless the on-prem app can't save just then; a save that can't be forwarded is told why. The tests in
+// this class run one at a time, so each can count what crossed the link.
+public partial class CloudForwardingTests(WebApps apps) : IClassFixture<WebApps>
 {
     const string LastSaveCookieName = "__Host-Ehr.LastSave";
 
@@ -104,6 +109,114 @@ public class CloudForwardingTests(WebApps apps) : IClassFixture<WebApps>
     }
 
     [Fact]
+    public async Task A_form_post_that_cannot_be_forwarded_gets_a_page_that_explains()
+    {
+        var patient = await apps.InsertPatientAsync("Lane", "Unsaved");
+        var signedIn = await CookieHeaderAsync(apps.OnPrem, await apps.ClinicianAsync());
+        using var client = CreateClient(apps.CloudCutOff, handleCookies: false);
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"/patients/{patient}/reason")
+        {
+            Content = Form(("Reason", "Covering the night shift")),
+        };
+        request.Headers.Add("Cookie", signedIn);
+
+        using var response = await client.SendAsync(request, Cancel);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+        var html = await response.Content.ReadAsStringAsync(Cancel);
+        Assert.Contains("Nothing was saved, because the clinic's server can't be reached.", html);
+        // Back to the form, by the browser's history where JavaScript runs, by its address where it doesn't.
+        Assert.Contains($"<a href=\"/patients/{patient}/reason\" data-back>Back</a>", html);
+        var assets = PageAssets().Matches(html).Select(match => match.Groups[1].Value).ToList();
+        Assert.Equal(["/_content/Ehr.Design/css/ehr.css", "/_content/Ehr.Design/js/back-link.js"], assets);
+        foreach (var asset in assets)
+        {
+            using var file = await client.GetAsync(asset, Cancel);
+            Assert.Equal(HttpStatusCode.OK, file.StatusCode);
+        }
+    }
+
+    [Fact]
+    public async Task An_htmx_post_that_cannot_be_forwarded_still_gets_the_short_message()
+    {
+        var page = await OpenAsync(apps, apps.CloudCutOff, via: apps.Cloud);
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{QuickTexts}?handler=Add")
+        {
+            Content = Form(("Shortcut", WebApps.NewShortcut()), ("Body", "Text"), ("__RequestVerificationToken", page.Token)),
+        };
+        request.Headers.Add("HX-Request", "true");
+
+        using var response = await page.Client.SendAsync(request, Cancel);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("Not saved: the on-prem server can't be reached.", await response.Content.ReadAsStringAsync(Cancel));
+    }
+
+    [Fact]
+    public async Task Signing_out_off_site_is_done_by_the_cloud_app_and_recorded_from_there()
+    {
+        var account = await apps.CreateStaffAsync("Dr. Done", StaffRoles.Clinician);
+        var session = await SignInAsync(apps.Cloud, account);
+        var forwarded = apps.Forwarded.Count;
+
+        using var signedOut = await PostFormAsync(session.Client, "/sign-out", QuickTexts);
+
+        Assert.Contains("Signed out", await ReadAsync(signedOut));
+        Assert.Empty(apps.Forwarded.Skip(forwarded));
+        await apps.ShipCloudAuditAsync();
+        Assert.Equal(1, await apps.AuditEventsAsync(AuditActions.SignOut, actorId: account.Id, source: AuditSources.Cloud));
+    }
+
+    [Fact]
+    public async Task A_sign_out_off_site_without_its_form_token_is_refused()
+    {
+        var account = await apps.CreateStaffAsync("Dr. Staying", StaffRoles.Clinician);
+        var session = await SignInAsync(apps.Cloud, account);
+
+        using var refused = await session.Client.PostAsync("/sign-out", Form(), Cancel);
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        // Still signed in: the clinic's home sends them to their patients, not to sign in.
+        using var home = await Client(apps.Cloud, session.Jar, followRedirects: false).GetAsync("/", Cancel);
+        Assert.Equal("/patients", new Uri(Base, home.Headers.Location!).AbsolutePath);
+        await apps.ShipCloudAuditAsync();
+        Assert.Equal(0, await apps.AuditEventsAsync(AuditActions.SignOut, actorId: account.Id));
+    }
+
+    [Fact]
+    public async Task During_an_outage_reads_after_a_save_come_from_the_replica()
+    {
+        var clinician = await apps.ClinicianAsync();
+        var patient = await apps.InsertPatientAsync("Remy", "Justsaved");
+        await apps.AssignAsync(clinician, patient);
+        var signedIn = await CookieHeaderAsync(apps.OnPrem, clinician);
+        apps.PrimaryDown = true;
+        try
+        {
+            Assert.False(await apps.CloudPrimaryDrill.Services.GetRequiredService<CloudAuditShipper>().ShipAsync(Cancel));
+            using var client = CreateClient(apps.CloudPrimaryDrill, handleCookies: false);
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"/patients/{patient}");
+            // A save the replica doesn't have yet, which would otherwise send this read to the on-prem app.
+            request.Headers.Add("Cookie", $"{signedIn}; {LastSaveCookie(position: "FFFFFFFF/FFFFFFFF")}");
+
+            using var response = await client.SendAsync(request, Cancel);
+
+            var html = await ReadAsync(response);
+            Assert.Contains("Justsaved, Remy", html);
+            Assert.Contains("Read-only: the clinic's server can't be reached", html);
+            Assert.False(RemovesLastSaveCookie(response));
+            // The read is recorded in the queue, for the on-prem app once it's back.
+            var (queued, _) = apps.CloudPrimaryDrill.Services.GetRequiredService<CloudAuditQueue>().ReadPending(int.MaxValue);
+            Assert.Contains(queued, e => e.Action == AuditActions.Read && e.PatientId == patient && e.ActorId == clinician.Id);
+        }
+        finally
+        {
+            apps.PrimaryDown = false;
+        }
+    }
+
+    [Fact]
     public async Task With_the_on_prem_app_unreachable_reads_come_from_the_replica()
     {
         await apps.InsertAsync(WebApps.NewShortcut(), "Still readable");
@@ -137,6 +250,9 @@ public class CloudForwardingTests(WebApps apps) : IClassFixture<WebApps>
         var setCookie = context.Response.Headers.SetCookie.ToString();
         return setCookie[..setCookie.IndexOf(';')];
     }
+
+    [GeneratedRegex("(?:href|src)=\"(/_content/[^\"]+)\"")]
+    private static partial Regex PageAssets();
 
     static bool RemovesLastSaveCookie(HttpResponseMessage response) =>
         response.Headers.TryGetValues("Set-Cookie", out var cookies)
