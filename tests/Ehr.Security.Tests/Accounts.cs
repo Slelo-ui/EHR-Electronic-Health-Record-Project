@@ -54,7 +54,7 @@ static class Accounts
             INSERT INTO ehr.patients (id, mrn, given_name, family_name, birth_date, gender, version, updated_at)
             VALUES (@id, @mrn, 'Test', 'Patient', '1980-01-01', 'unknown', 1, now())
             """,
-            ("id", id), ("mrn", id.ToString("N")[..12]));
+            ("id", id), ("mrn", id.ToString("N")[^12..]));
         return id;
     }
 
@@ -65,6 +65,23 @@ static class Accounts
         await ExecuteAsync(database.ConnectionStringFor("ehr_app", MigratedDatabase.AppPassword), clinicianId,
             "INSERT INTO ehr.patient_assignments (id, patient_id, clinician_id, assigned_at) VALUES (@id, @patient, @clinician, now())",
             ("id", id), ("patient", patientId), ("clinician", clinicianId));
+        return id;
+    }
+
+    // The chart's other tables, each with the smallest row it takes. Nothing at runtime writes them yet, so rows are
+    // inserted as the superuser, the way a seed would.
+    public static readonly Dictionary<string, string> ChartTables = new()
+    {
+        ["allergy_intolerances"] = "INSERT INTO ehr.allergy_intolerances (id, patient_id, display, clinical_status, recorded_at) VALUES (@id, @patient, 'Penicillin', 'active', now())",
+        ["medication_statements"] = "INSERT INTO ehr.medication_statements (id, patient_id, display, status) VALUES (@id, @patient, 'Lisinopril 10 mg tablet', 'active')",
+        ["conditions"] = "INSERT INTO ehr.conditions (id, patient_id, display, clinical_status) VALUES (@id, @patient, 'Essential (primary) hypertension', 'active')",
+        ["encounters"] = "INSERT INTO ehr.encounters (id, patient_id, status, class_code, period_start) VALUES (@id, @patient, 'finished', 'AMB', now())",
+    };
+
+    public static async Task<Guid> ChartRowAsync(MigratedDatabase database, string table, Guid patientId)
+    {
+        var id = Guid.CreateVersion7();
+        await ExecuteAsync(database.SuperuserConnectionString, null, ChartTables[table], ("id", id), ("patient", patientId));
         return id;
     }
 

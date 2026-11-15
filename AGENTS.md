@@ -24,9 +24,11 @@ Conventions every coding agent (and every person) follows in this repo. Most com
 - Schema: EF Core migrations in `db/migrations` (the `Ehr.Migrations` project), added with `dotnet ef migrations add <Name> --project db/migrations`. Every migration is committed with the regenerated `db/migrations/schema.sql`, so reviewers read the real SQL; a test fails if it's out of date.
 - RLS, triggers, roles, and grants: hand-written in `db/policies`. Plain SQL only (no psql commands), safe to run again. `00-roles.sql` runs before the migrations; every other file runs after them, in name order.
 - A function that runs as its owner (`SECURITY DEFINER`) sets `search_path` and revokes `EXECUTE` from `PUBLIC`. `Ehr.Security.Tests` fails otherwise.
+- A policy calls the user-context functions as scalar subqueries, `(SELECT ehr.is_clinician())`, so PostgreSQL runs each once per statement instead of once per row. `Ehr.Security.Tests` fails otherwise.
 - Every table gets explicit grants in `db/policies/10-grants.sql` and the same privileges in `ExpectedPrivileges` in `Ehr.Security.Tests`. A table without them fails CI. The file revokes everything from the runtime roles first, so it is the complete list: never grant privileges anywhere else. Runtime roles never get `DELETE` unless a feature needs it.
 - The infrastructure roles `replicator` (cloud standby) and `barman` (backups), and the migration role `ehr_owner` with the `ehr` schema it owns, are created when the primary is first initialized, by `infra/compose/postgres/primary/initdb`. `replicator` and `barman` have no table privileges. `ehr_owner` can create roles, which it uses to manage `ehr_app` and `ehr_read` from `db/policies`; PostgreSQL stops it from creating superuser, replication, or `BYPASSRLS` roles.
 - Migrations run as `ehr_owner`, only through the migration job (`infra/migrate`): in the local stack, in CI, and at deploy. The running apps never use that role.
+- The synthetic seed (`bench/Ehr.Seed`) is the one other use of `ehr_owner`, and only on a clinic with no patients: in one transaction it lifts forced row-level security and the write-audit triggers on the tables it fills, loads them, and restores both before committing, so seeded rows have no write-audit events. `Ehr.Security.Tests` checks that it leaves both in place, refuses a clinic with patients, and leaves nothing behind when it fails.
 
 ## Human review
 
@@ -53,7 +55,7 @@ The `ci` check passes (`.github/workflows/ci.yml`). Today it runs:
 
 Gates added to `ci` as the code they check appears:
 
-- p99 server render under 20 ms on 50,000 seeded patients; page JavaScript under 50 KB; first contentful paint under 500 ms.
+- p99 server render under 20 ms on 50,000 seeded patients; page JavaScript under 50 KB, compressed, as served; first contentful paint under 500 ms.
 - Dictation eval scores do not drop below the last accepted baseline.
 
 Run `dotnet format` (and `cargo fmt` for the desktop app) before pushing.

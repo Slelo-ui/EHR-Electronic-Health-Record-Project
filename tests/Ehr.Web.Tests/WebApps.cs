@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Ehr.Data.Accounts;
+using Ehr.Data.Patients;
 using Ehr.Domain.Accounts;
 using Ehr.Testing;
 using Ehr.Web.Api.Audit;
@@ -17,6 +18,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 using Xunit;
 
@@ -42,6 +44,10 @@ public sealed class WebApps : IAsyncLifetime
     public MigratedDatabase Database { get; } = new();
 
     public WebApplicationFactory<Program> OnPrem { get; private set; } = null!;
+
+    // The on-prem app as it runs outside Development, where a failing page gets the error pages (ErrorPages) rather
+    // than the developer exception page. Like the others, it starts when a test first uses it.
+    public WebApplicationFactory<Program> OnPremProduction { get; private set; } = null!;
 
     public WebApplicationFactory<Program> Cloud { get; private set; } = null!;
 
@@ -95,6 +101,7 @@ public sealed class WebApps : IAsyncLifetime
 
         await Database.InitializeAsync();
         OnPrem = new App(Site.OnPrem, Database.ConnectionStringFor("ehr_app", MigratedDatabase.AppPassword), Emails, this, bootstrapAdmin: true);
+        OnPremProduction = new App(Site.OnPrem, Database.ConnectionStringFor("ehr_app", MigratedDatabase.AppPassword), Emails, this, environment: Environments.Production);
 
         // Starting the on-prem app first also creates the Data Protection key, which the cloud app can't create.
         var link = new RecordingLink(OnPrem.Server.CreateHandler(), Forwarded);
@@ -121,6 +128,11 @@ public sealed class WebApps : IAsyncLifetime
         if (Cloud is not null)
         {
             await Cloud.DisposeAsync();
+        }
+
+        if (OnPremProduction is not null)
+        {
+            await OnPremProduction.DisposeAsync();
         }
 
         if (OnPrem is not null)
@@ -211,25 +223,75 @@ public sealed class WebApps : IAsyncLifetime
             new SignInRequest(account.Email, account.Password, code, "test desktop"), JsonSerializerOptions.Web, TestContext.Current.CancellationToken);
 
     // A patient row, inserted as the superuser the way a seed would: row-level security doesn't apply, and the audit
-    // trigger records no actor.
-    public async Task<Guid> InsertPatientAsync(string givenName, string familyName)
+    // trigger records no actor. Born on 1980-01-01 unless the test says otherwise; the MRN is MrnOf the ID.
+    public async Task<Guid> InsertPatientAsync(string givenName, string familyName, DateOnly? birthDate = null)
     {
         var id = Guid.CreateVersion7();
         await using var connection = await OpenDatabaseAsync();
         await using var command = new NpgsqlCommand(
             """
             INSERT INTO ehr.patients (id, mrn, given_name, family_name, birth_date, gender, version, updated_at)
-            VALUES (@id, @mrn, @given, @family, '1980-01-01', 'unknown', 1, now())
+            VALUES (@id, @mrn, @given, @family, @born, 'unknown', 1, now())
             """,
             connection);
         command.Parameters.AddWithValue("id", id);
-        // From the random end of the ID: the start of a version 7 GUID is the time, the same for two made in one
-        // millisecond.
-        command.Parameters.AddWithValue("mrn", id.ToString("N")[^12..]);
+        command.Parameters.AddWithValue("mrn", MrnOf(id));
         command.Parameters.AddWithValue("given", givenName);
         command.Parameters.AddWithValue("family", familyName);
+        command.Parameters.AddWithValue("born", birthDate ?? new DateOnly(1980, 1, 1));
         await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
         return id;
+    }
+
+    // The MRN InsertPatientAsync gives a patient: the random end of the ID, since the start of a version 7 GUID is the
+    // time, the same for two made in one millisecond.
+    public static string MrnOf(Guid patientId) => patientId.ToString("N")[^12..];
+
+    // The rest of a patient's chart, inserted as the superuser the way a seed would: nothing at runtime writes it yet.
+    // An allergy's recorded date is fixed, so a page can be checked for it.
+    public Task InsertAllergyAsync(
+        Guid patientId, string display, string status = AllergyClinicalStatus.Active, string? code = null, string? criticality = null,
+        string? reaction = null) =>
+        InsertChartRowAsync(
+            """
+            INSERT INTO ehr.allergy_intolerances (id, patient_id, code, display, clinical_status, criticality, reaction, recorded_at)
+            VALUES (@id, @patient, @code, @display, @status, @criticality, @reaction, '2025-03-04T10:00:00Z')
+            """,
+            ("patient", patientId), ("code", code), ("display", display), ("status", status), ("criticality", criticality), ("reaction", reaction));
+
+    public Task InsertMedicationAsync(Guid patientId, string display, string status = MedicationStatementStatus.Active, string? dosage = null) =>
+        InsertChartRowAsync(
+            "INSERT INTO ehr.medication_statements (id, patient_id, display, dosage, status) VALUES (@id, @patient, @display, @dosage, @status)",
+            ("patient", patientId), ("display", display), ("dosage", dosage), ("status", status));
+
+    public Task InsertConditionAsync(
+        Guid patientId, string display, string status = ConditionClinicalStatus.Active, string? code = null, DateOnly? onset = null) =>
+        InsertChartRowAsync(
+            "INSERT INTO ehr.conditions (id, patient_id, code, display, clinical_status, onset_date) VALUES (@id, @patient, @code, @display, @status, @onset)",
+            ("patient", patientId), ("code", code), ("display", display), ("status", status), ("onset", onset));
+
+    public Task InsertVisitAsync(
+        Guid patientId, DateTimeOffset start, string status = EncounterStatus.Finished, string? reason = null, short? systolic = null,
+        short? diastolic = null, short? heartRate = null) =>
+        InsertChartRowAsync(
+            """
+            INSERT INTO ehr.encounters (id, patient_id, status, class_code, reason, period_start, systolic_mm_hg, diastolic_mm_hg, heart_rate_per_minute)
+            VALUES (@id, @patient, @status, 'AMB', @reason, @start, @systolic, @diastolic, @heart_rate)
+            """,
+            ("patient", patientId), ("status", status), ("reason", reason), ("start", start.ToUniversalTime()), ("systolic", systolic),
+            ("diastolic", diastolic), ("heart_rate", heartRate));
+
+    async Task InsertChartRowAsync(string sql, params (string Name, object? Value)[] parameters)
+    {
+        await using var connection = await OpenDatabaseAsync();
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("id", Guid.CreateVersion7());
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        }
+
+        await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
     }
 
     // The patient on the clinician's panel, inserted as the superuser the way a seed would, so the chart opens without
@@ -327,11 +389,19 @@ public sealed class WebApps : IAsyncLifetime
         return connection;
     }
 
-    sealed class App(Site site, string connectionString, RecordingEmailSender emails, WebApps apps, OnPremApp? onPrem = null, bool bootstrapAdmin = false)
+    sealed class App(
+        Site site, string connectionString, RecordingEmailSender emails, WebApps apps, OnPremApp? onPrem = null, bool bootstrapAdmin = false,
+        string? environment = null)
         : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
+            // Development otherwise, as WebApplicationFactory runs it.
+            if (environment is not null)
+            {
+                builder.UseEnvironment(environment);
+            }
+
             builder
                 .UseSetting("Ehr:Site", site.ToString())
                 .UseSetting("ConnectionStrings:Ehr", connectionString)

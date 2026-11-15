@@ -6,13 +6,30 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace Ehr.Web.Areas.Clinical.Pages.Patients;
 
-// A patient's chart: the demographics for now. A patient off the clinician's panel first asks for a reason (Reason,
-// BreakGlass); then the read goes through the PHI reader, which records it, and a patient this clinician may not see
-// is not found, which gives nothing away. From here a clinician puts the patient on their panel or takes them off it,
-// and issues the patient a portal enrollment code.
+// A patient's chart: demographics, allergies, medications, diagnoses and recent visits, read only for now. A patient
+// off the clinician's panel first asks for a reason (Reason, BreakGlass); then the read goes through the PHI reader,
+// which records it as one read of the patient, and a patient this clinician may not see is not found, which gives
+// nothing away. From here a clinician puts the patient on their panel or takes them off it, and issues the patient a
+// portal enrollment code. The search the clinician came from travels along (SearchQuery), for the way back to it.
 public class ChartModel(PhiReader phi, PatientAssignments assignments, BreakGlass breakGlass, PatientEnrollments enrollments) : PageModel
 {
-    public Patient Patient { get; private set; } = null!;
+    // How many of the latest visits the chart lists.
+    public const int RecentVisits = 5;
+
+    [BindProperty(SupportsGet = true)]
+    public SearchQuery Search { get; set; } = SearchQuery.None;
+
+    public PatientChart Chart { get; private set; } = null!;
+
+    public Patient Patient => Chart.Patient;
+
+    // The allergies to list: every active one but a "No known allergy" entry.
+    public IReadOnlyList<AllergyIntolerance> KnownAllergies =>
+        [.. Chart.Allergies.Where(a => a.Code != AllergyIntolerance.NoKnownAllergy)];
+
+    // The "No known allergy" entry when nothing else is recorded: not the same as no allergy information at all.
+    public AllergyIntolerance? NoKnownAllergies =>
+        KnownAllergies.Count == 0 ? Chart.Allergies.FirstOrDefault(a => a.Code == AllergyIntolerance.NoKnownAllergy) : null;
 
     public bool OnPanel { get; private set; }
 
@@ -20,6 +37,13 @@ public class ChartModel(PhiReader phi, PatientAssignments assignments, BreakGlas
     public DateTimeOffset? EmergencyUntil { get; private set; }
 
     public string? EnrollmentCode { get; private set; }
+
+    // A visit's vital signs as the chart shows them, or null when they weren't taken.
+    public static string? BloodPressure(Encounter visit) =>
+        visit is { SystolicMmHg: { } systolic, DiastolicMmHg: { } diastolic } ? $"{systolic}/{diastolic} mmHg" : null;
+
+    public static string? HeartRate(Encounter visit) =>
+        visit.HeartRatePerMinute is { } rate ? $"{rate}/min" : null;
 
     public async Task<IActionResult> OnGetAsync(Guid id) => await LoadAsync(id) ?? Page();
 
@@ -31,7 +55,7 @@ public class ChartModel(PhiReader phi, PatientAssignments assignments, BreakGlas
         }
 
         await assignments.AssignAsync(id, HttpContext.RequestAborted);
-        return RedirectToPage(new { id });
+        return RedirectToPage(Search.ChartRouteValues(id));
     }
 
     public async Task<IActionResult> OnPostUnassignAsync(Guid id)
@@ -42,7 +66,7 @@ public class ChartModel(PhiReader phi, PatientAssignments assignments, BreakGlas
         }
 
         await assignments.EndAsync(id, HttpContext.RequestAborted);
-        return RedirectToPage(new { id });
+        return RedirectToPage(Search.ChartRouteValues(id));
     }
 
     public async Task<IActionResult> OnPostEnrollAsync(Guid id)
@@ -65,17 +89,17 @@ public class ChartModel(PhiReader phi, PatientAssignments assignments, BreakGlas
             EmergencyUntil = await breakGlass.ActiveUntilAsync(id, HttpContext.RequestAborted);
             if (EmergencyUntil is null)
             {
-                return RedirectToPage("Reason", new { id });
+                return RedirectToPage("Reason", Search.ChartRouteValues(id));
             }
         }
 
-        var patient = await phi.PatientAsync(id, HttpContext.RequestAborted);
-        if (patient is null)
+        var chart = await phi.ChartAsync(id, RecentVisits, HttpContext.RequestAborted);
+        if (chart is null)
         {
             return NotFound();
         }
 
-        Patient = patient;
+        Chart = chart;
         return null;
     }
 }

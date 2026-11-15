@@ -1,3 +1,4 @@
+using System.Globalization;
 using Ehr.Data.Patients;
 using Ehr.Domain.Patients;
 using Ehr.Domain.Phi;
@@ -6,35 +7,125 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 
 namespace Ehr.Web.Areas.Clinical.Pages.Patients;
 
-// The clinician's patients: their own panel first, and a search across the clinic by name or MRN, with the patients
-// already on their panel marked. Every patient listed is a PHI read, recorded by the PHI reader; row-level security
-// decides which patients exist for this clinician.
+// The clinician's patients: their own panel first, and a search across the clinic by name, date of birth and MRN,
+// combined, with the patients on their panel marked as theirs and the rest as restricted, since opening one of those
+// asks for a reason first (Reason). Criteria that can't be searched as given say why instead. Results also come as the
+// clinician types (OnGetResultsAsync, through htmx), the results alone and fewer of them; a plain submit still works
+// without JavaScript. Every patient listed is a PHI read, recorded by the PHI reader; row-level security decides which
+// patients exist for this clinician.
 public class IndexModel(PhiReader phi, PatientAssignments assignments) : PageModel
 {
     public const int Limit = 100;
 
+    // As the clinician types, each pause lists patients again, and each one listed is a recorded read: so fewer.
+    public const int LiveLimit = 20;
+
+    // The longest a name and an MRN can be (PatientConfiguration).
+    const int MaximumNameLength = 100;
+
+    const int MaximumMrnLength = 20;
+
     [BindProperty(SupportsGet = true)]
-    public string? Q { get; set; }
+    public SearchQuery Search { get; set; } = SearchQuery.None;
+
+    // Why the search can't run as given, to correct; empty when it ran or there was none.
+    public IReadOnlyList<string> Problems { get; private set; } = [];
+
+    // Whether a search ran: then Results holds what it found, otherwise PanelPatients the panel.
+    public bool Searched { get; private set; }
 
     // The panel, when there is no search.
     public IReadOnlyList<Patient> PanelPatients { get; private set; } = [];
 
-    // The search results, when there is one.
+    // The search results, when there is one, and whether more patients matched than are listed.
     public IReadOnlyList<Patient> Results { get; private set; } = [];
+
+    public bool More { get; private set; }
+
+    // Whether these are results as the clinician types, which list up to LiveLimit.
+    public bool Live { get; private set; }
 
     // Who is on the panel, to mark in the results.
     public IReadOnlySet<Guid> Panel { get; private set; } = new HashSet<Guid>();
 
-    public async Task OnGetAsync()
+    // The latest date of birth a search takes: today, with a day's slack for the clinic's time zone.
+    public static DateOnly LatestBirthDate => DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1);
+
+    public Task OnGetAsync() => LoadAsync(Limit);
+
+    // The results alone, for htmx to put under the form as the clinician types.
+    public async Task<IActionResult> OnGetResultsAsync()
     {
-        if (Q is { Length: > 0 })
+        Live = true;
+        await LoadAsync(LiveLimit);
+        return Partial("_SearchResults", this);
+    }
+
+    async Task LoadAsync(int limit)
+    {
+        if (Search.IsEmpty)
         {
-            Results = await phi.SearchPatientsAsync(Q, Limit, HttpContext.RequestAborted);
-            Panel = await assignments.PanelIdsAsync(HttpContext.RequestAborted);
+            // Fields emptied as the clinician types list nobody: the panel would be up to Limit more reads at every
+            // pause, and Clear brings it back.
+            if (!Live)
+            {
+                PanelPatients = await phi.PanelAsync(Limit, HttpContext.RequestAborted);
+            }
+
+            return;
         }
-        else
+
+        var name = Search.Name?.Trim() is { Length: > 0 } givenName ? givenName : null;
+        var mrn = Search.Mrn?.Trim() is { Length: > 0 } givenMrn ? givenMrn : null;
+        DateOnly? birthDate = null;
+        var problems = new List<string>();
+        if (name is { Length: < PhiReader.MinimumNameLength })
         {
-            PanelPatients = await phi.PanelAsync(Limit, HttpContext.RequestAborted);
+            problems.Add($"Type at least {PhiReader.MinimumNameLength} letters of the name.");
         }
+        else if (name is { Length: > MaximumNameLength })
+        {
+            problems.Add($"A name can be at most {MaximumNameLength} characters.");
+        }
+        else if (name?.Any(char.IsControl) == true)
+        {
+            // Such as a NUL, which PostgreSQL refuses in text.
+            problems.Add("The name has a control character in it. Type it again.");
+        }
+
+        if (Search.Birthdate?.Trim() is { Length: > 0 } text)
+        {
+            if (!DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            {
+                problems.Add("Enter the date of birth as a full date, such as 1980-05-02.");
+            }
+            else if (date > LatestBirthDate)
+            {
+                problems.Add("That date of birth is in the future. Check the year.");
+            }
+            else
+            {
+                birthDate = date;
+            }
+        }
+
+        if (mrn is { Length: > MaximumMrnLength })
+        {
+            problems.Add($"An MRN has at most {MaximumMrnLength} characters.");
+        }
+        else if (mrn?.Any(char.IsControl) == true)
+        {
+            problems.Add("The MRN has a control character in it. Type it again.");
+        }
+
+        Problems = problems;
+        if (problems.Count > 0)
+        {
+            return;
+        }
+
+        var found = await phi.SearchPatientsAsync(name, birthDate, mrn, limit, HttpContext.RequestAborted);
+        (Searched, Results, More) = (true, found.Patients, found.More);
+        Panel = await assignments.PanelIdsAsync(HttpContext.RequestAborted);
     }
 }
